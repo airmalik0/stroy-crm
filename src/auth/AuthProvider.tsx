@@ -12,6 +12,7 @@ type AuthState = {
   isManager: boolean
   loading: boolean
   profileMissing: boolean
+  profileFailed: boolean
 }
 
 const AuthContext = createContext<AuthState | null>(null)
@@ -51,7 +52,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         profile,
         isManager: profile?.role === 'manager',
         loading: !sessionLoaded || (Boolean(userId) && profileQuery.isPending),
-        profileMissing: Boolean(userId) && !profileQuery.isPending && !profile,
+        profileMissing: Boolean(userId) && profileQuery.isSuccess && !profile,
+        profileFailed: Boolean(userId) && profileQuery.isError,
       }}
     >
       {children}

@@ -229,6 +229,22 @@ describe('Запись: исполнитель не меняет данные в
     expect(task.error?.code).toBe('42501')
   })
 
+  it('по ответу на запись нельзя узнать, существует ли чужой объект или человек', async () => {
+    const missing = '00000000-0000-4000-8000-000000000000'
+    const attempts = await Promise.all(
+      [
+        { object_id: onlyBObject, assignee_id: executorB.id },
+        { object_id: missing, assignee_id: executorB.id },
+        { object_id: onlyBObject, assignee_id: manager.id },
+        { object_id: missing, assignee_id: missing },
+      ].map((refs) => executorA.db.from('tasks').insert({ title: 'Проба', ...refs })),
+    )
+    for (const { error, status } of attempts) {
+      expect(error?.code).toBe('42501')
+      expect(status).toBe(403)
+    }
+  })
+
   it('не правит поля своей задачи', async () => {
     const { data } = await executorA.db
       .from('tasks')
@@ -321,13 +337,26 @@ describe('Поля, которые задаёт только база', () => {
     expect(update.error).not.toBeNull()
   })
 
+  it('правка названия не проверяет заново исполнителя и объект, которых не меняли', async () => {
+    const id = await createTask(sharedObject, executorA.id, 'До правки')
+    const { error } = await manager.db
+      .from('tasks')
+      .update({ title: 'После правки', object_id: sharedObject, assignee_id: executorA.id })
+      .eq('id', id)
+    expect(error).toBeNull()
+  })
+
   it('пустое название не проходит', async () => {
     const task = await manager.db
       .from('tasks')
       .insert({ title: '   ', object_id: sharedObject, assignee_id: executorA.id })
     const object = await manager.db.from('objects').insert({ name: '\n\t', address: 'Адрес' })
+    const invisible = await manager.db
+      .from('tasks')
+      .insert({ title: '\u200b', object_id: sharedObject, assignee_id: executorA.id })
     expect(task.error).not.toBeNull()
     expect(object.error).not.toBeNull()
+    expect(invisible.error).not.toBeNull()
   })
 })
 
@@ -383,11 +412,13 @@ describe('Переходы статусов: полная матрица', () =>
     const missing = await move(executorB, '00000000-0000-4000-8000-000000000000', 'in_progress')
     expect(foreign.error?.message).toBe('Задача не найдена')
     expect(missing.error?.message).toBe('Задача не найдена')
+    expect(foreign.status).toBe(404)
+    expect(missing.status).toBe(404)
   })
 
   it('возврат на доработку без комментария не проходит', async () => {
     const id = await taskInStatus('review')
-    for (const comment of [undefined, '', '    ', '\n\t']) {
+    for (const comment of [undefined, '', '    ', '\n\t', '\u200b', '\ufeff', '...']) {
       const { error } = await move(manager, id, 'rework', comment)
       expect(error?.message).toBe('Для этого действия нужен комментарий')
     }
@@ -403,6 +434,20 @@ describe('Переходы статусов: полная матрица', () =>
     ])
     expect([accept.error, rework.error].filter((error) => error === null)).toHaveLength(1)
     expect(await historyOf(id)).toHaveLength(before + 1)
+  })
+
+  it('задача не остаётся живой в объекте, который удаляют в этот же момент', async () => {
+    for (let round = 0; round < 10; round += 1) {
+      const objectId = await createObject(`Гонка ${round}`)
+      const moved = await createTask(sharedObject, executorA.id, `Перенос ${round}`)
+      await Promise.all([
+        manager.db.from('tasks').insert({ title: `Гонка ${round}`, object_id: objectId, assignee_id: executorA.id }),
+        manager.db.from('tasks').update({ object_id: objectId }).eq('id', moved),
+        manager2.db.rpc('delete_object', { p_object_id: objectId }),
+      ])
+      const { data } = await manager.db.from('tasks').select('id').eq('object_id', objectId)
+      expect(data).toEqual([])
+    }
   })
 
   it('двойное нажатие не создаёт второй записи', async () => {

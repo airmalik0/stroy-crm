@@ -16,8 +16,10 @@ as $$
 declare
   v_uid uuid := auth.uid();
   v_is_manager boolean := private.is_manager();
-  -- btrim убирает только пробелы, а комментарий из переводов строки тоже пустой.
-  v_comment text := nullif(regexp_replace(p_comment, '^[[:space:]]+|[[:space:]]+$', '', 'g'), '');
+  -- Без единой буквы или цифры комментарий считается пустым: пробелы, переводы строки, невидимые символы.
+  v_comment text := case
+    when p_comment ~ '[[:alnum:]]' then regexp_replace(p_comment, '^[[:space:]]+|[[:space:]]+$', '', 'g')
+  end;
   v_task public.tasks;
   v_rule public.task_transitions;
 begin
@@ -29,7 +31,7 @@ begin
 
   -- Чужая задача для исполнителя неотличима от несуществующей.
   if not found or v_uid is null or not (v_is_manager or v_task.assignee_id = v_uid) then
-    raise exception 'Задача не найдена' using errcode = 'P0002';
+    raise exception 'Задача не найдена' using errcode = 'PT404';
   end if;
 
   select * into v_rule
@@ -96,7 +98,7 @@ begin
   where id = p_task_id and deleted_at is null;
 
   if not found then
-    raise exception 'Задача не найдена' using errcode = 'P0002';
+    raise exception 'Задача не найдена' using errcode = 'PT404';
   end if;
 end;
 $$;
@@ -116,7 +118,7 @@ begin
   where id = p_object_id and deleted_at is null;
 
   if not found then
-    raise exception 'Объект не найден' using errcode = 'P0002';
+    raise exception 'Объект не найден' using errcode = 'PT404';
   end if;
 
   update public.tasks set deleted_at = now()
@@ -152,8 +154,9 @@ create trigger tasks_log_created
   after insert on public.tasks
   for each row execute function private.log_task_created();
 
--- Назначить можно только исполнителя и только в живой объект. Функция читает таблицы без RLS,
--- поэтому результат не зависит от того, что видно вызывающему.
+-- Назначить можно только исполнителя и только в живой объект. Триггер after: сначала RLS отсекает
+-- тех, кому запись запрещена, и они не могут по тексту ошибки узнать, существует ли объект или человек.
+-- Функция читает таблицы без RLS, поэтому результат не зависит от того, что видно вызывающему.
 create function private.check_task_refs()
 returns trigger
 language plpgsql
@@ -161,24 +164,33 @@ security definer
 set search_path = ''
 as $$
 begin
-  if not exists (
-    select 1 from public.profiles where id = new.assignee_id and role = 'executor'
-  ) then
-    raise exception 'Назначить можно только исполнителя' using errcode = 'P0001';
+  if tg_op = 'INSERT' or new.assignee_id is distinct from old.assignee_id then
+    if not exists (
+      select 1 from public.profiles where id = new.assignee_id and role = 'executor'
+    ) then
+      raise exception 'Назначить можно только исполнителя' using errcode = 'P0001';
+    end if;
   end if;
 
-  if not exists (
-    select 1 from public.objects where id = new.object_id and deleted_at is null
-  ) then
-    raise exception 'Объект не найден' using errcode = 'P0002';
+  -- for share: если объект удаляют прямо сейчас, запись дождётся конца удаления и получит отказ.
+  -- Иначе задача осталась бы живой в удалённом объекте. Только при смене объекта: блокировка
+  -- при каждой правке давала бы взаимную блокировку с delete_object, который тоже меняет задачи.
+  if tg_op = 'INSERT' or new.object_id is distinct from old.object_id then
+    perform 1 from public.objects
+    where id = new.object_id and deleted_at is null
+    for share;
+
+    if not found then
+      raise exception 'Объект не найден' using errcode = 'P0001';
+    end if;
   end if;
 
-  return new;
+  return null;
 end;
 $$;
 
 create trigger tasks_check_refs
-  before insert or update of assignee_id, object_id on public.tasks
+  after insert or update of assignee_id, object_id on public.tasks
   for each row execute function private.check_task_refs();
 
 -- История неизменяема для всех, включая service_role и администратора базы:
@@ -213,7 +225,10 @@ begin
   insert into public.profiles (id, full_name, role)
   values (
     new.id,
-    coalesce(nullif(regexp_replace(new.raw_user_meta_data ->> 'full_name', '^[[:space:]]+|[[:space:]]+$', '', 'g'), ''), new.email, 'Без имени'),
+    case
+      when new.raw_user_meta_data ->> 'full_name' ~ '[[:alnum:]]' then new.raw_user_meta_data ->> 'full_name'
+      else coalesce(new.email, 'Без имени')
+    end,
     'executor'
   );
   return new;

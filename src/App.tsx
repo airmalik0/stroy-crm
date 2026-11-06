@@ -10,7 +10,7 @@ import { TaskPage } from './pages/TaskPage'
 import { TasksPage } from './pages/TasksPage'
 
 export function App() {
-  const { session, isManager, loading, profileMissing } = useAuth()
+  const { session, isManager, loading, profileMissing, profileFailed } = useAuth()
 
   if (loading) {
     return (
@@ -21,7 +21,7 @@ export function App() {
   }
 
   if (!session) return <LoginPage />
-  if (profileMissing) return <NoProfilePage />
+  if (profileMissing || profileFailed) return <NoProfilePage failed={profileFailed} />
 
   return (
     <Layout>
