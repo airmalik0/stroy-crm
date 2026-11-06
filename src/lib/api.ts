@@ -20,6 +20,9 @@ function unwrap<T>({ data, error }: Result<T>): T {
 
 const rows = <T>(result: Result<T[] | null>): T[] => unwrap(result) ?? []
 
+// Адрес с некорректным id это та же "не найдено", а не ошибка базы.
+const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+
 export const fetchProfile = async (id: string) =>
   unwrap(await supabase.from('profiles').select('id, full_name, role').eq('id', id).maybeSingle())
 
@@ -30,16 +33,19 @@ export const fetchObjects = async () =>
   rows(await supabase.from('objects').select('id, name, address, tasks (status)').order('name'))
 
 export const fetchObject = async (id: string) =>
-  unwrap(await supabase.from('objects').select('id, name, address').eq('id', id).maybeSingle())
+  isUuid(id) ? unwrap(await supabase.from('objects').select('id, name, address').eq('id', id).maybeSingle()) : null
 
 export const fetchTasks = async (filter: { objectId?: string } = {}) => {
   let query = supabase.from('tasks').select(TASK_FIELDS).order('created_at', { ascending: false })
-  if (filter.objectId) query = query.eq('object_id', filter.objectId)
+  if (filter.objectId) {
+    if (!isUuid(filter.objectId)) return []
+    query = query.eq('object_id', filter.objectId)
+  }
   return rows(await query)
 }
 
 export const fetchTask = async (id: string) =>
-  unwrap(await supabase.from('tasks').select(TASK_FIELDS).eq('id', id).maybeSingle())
+  isUuid(id) ? unwrap(await supabase.from('tasks').select(TASK_FIELDS).eq('id', id).maybeSingle()) : null
 
 export const fetchHistory = async (taskId: string) =>
   rows(

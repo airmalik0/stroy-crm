@@ -38,7 +38,7 @@ export function TaskPage() {
 
   if (task.isPending) return <QueryLoader />
   if (task.error) return <QueryError error={task.error} />
-  if (!task.data) return <NotFound what="Задача" />
+  if (!task.data) return <NotFound title="Задача не найдена" />
 
   const data = task.data
 

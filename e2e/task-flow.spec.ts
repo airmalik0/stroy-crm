@@ -92,9 +92,11 @@ test('задача проходит полный цикл, каждый види
     await expect(page.getByText(taskTitle)).toHaveCount(0)
 
     await page.goto(taskUrl)
-    await expect(page.getByText('Задача не найден(а)')).toBeVisible()
+    await expect(page.getByText('Задача не найдена')).toBeVisible()
     await page.goto(objectUrl)
-    await expect(page.getByText('Объект не найден(а)')).toBeVisible()
+    await expect(page.getByText('Объект не найден')).toBeVisible()
+    await page.goto('/tasks/not-a-uuid')
+    await expect(page.getByText('Задача не найдена')).toBeVisible()
     await logout(page)
   })
 

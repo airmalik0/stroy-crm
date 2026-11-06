@@ -16,9 +16,9 @@ export function QueryError({ error }: { error: Error }) {
   )
 }
 
-export function NotFound({ what }: { what: string }) {
+export function NotFound({ title }: { title: string }) {
   return (
-    <Alert color="gray" variant="light" title={`${what} не найден(а)`}>
+    <Alert color="gray" variant="light" title={title}>
       Запись удалена или у вас нет к ней доступа.
     </Alert>
   )

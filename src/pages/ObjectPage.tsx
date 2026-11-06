@@ -27,7 +27,7 @@ export function ObjectPage() {
 
   if (object.isPending) return <QueryLoader />
   if (object.error) return <QueryError error={object.error} />
-  if (!object.data) return <NotFound what="Объект" />
+  if (!object.data) return <NotFound title="Объект не найден" />
 
   const taskCount = tasks.data?.length ?? 0
 
