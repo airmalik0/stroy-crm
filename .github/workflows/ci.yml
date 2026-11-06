@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm audit --omit=dev --audit-level=high
+
+      - name: Запуск Supabase с миграциями и демо-данными
+        run: npx supabase start
+      - name: Адрес и публичный ключ для интерфейса и тестов
+        run: |
+          eval "$(npx supabase status -o env)"
+          printf 'VITE_SUPABASE_URL=%s\nVITE_SUPABASE_PUBLISHABLE_KEY=%s\n' "$API_URL" "$PUBLISHABLE_KEY" > .env.local
+
+      - run: npm run build
+      - name: В сборке фронтенда нет секретного ключа
+        run: "! grep -rE 'sb_secret_[A-Za-z0-9_-]{16,}' dist"
+
+      - run: npm run test:db
+      - run: npm run test:security
+
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
