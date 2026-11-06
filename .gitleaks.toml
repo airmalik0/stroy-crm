@@ -1,0 +1,6 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Публичный ключ Supabase для демо-стенда: он и так виден в браузере любого посетителя"
+paths = ['''\.env\.example$''']
